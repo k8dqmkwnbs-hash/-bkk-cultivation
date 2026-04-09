@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ตำนานจอมยุทธพระนคร: World Control</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root { --gold: #fbc02d; --red: #d32f2f; --dark: #121212; --panel: #1e1e1e; }
+        body { font-family: 'Mitr', sans-serif; background: var(--dark); color: white; margin: 0; padding: 20px; }
+        
+        /* World State Bar */
+        .world-status { background: var(--panel); border: 2px solid #333; border-radius: 10px; padding: 15px; margin-bottom: 20px; border-left: 5px solid var(--gold); }
+        .chaos-bar { background: #000; height: 20px; border-radius: 10px; margin-top: 10px; overflow: hidden; border: 1px solid #444; }
+        #chaosFill { background: linear-gradient(90deg, #ff9800, #f44336); height: 100%; width: 0%; transition: 1s ease-in-out; }
+
+        /* Chat & Logs */
+        #logWindow { background: #000; height: 300px; border: 1px solid #333; border-radius: 8px; padding: 15px; overflow-y: auto; margin-bottom: 10px; font-size: 0.9rem; }
+        .msg { margin-bottom: 8px; border-left: 3px solid #555; padding-left: 10px; }
+        .msg.system { border-color: var(--gold); color: var(--gold); font-weight: bold; }
+        .msg.boss { border-color: var(--red); color: var(--red); animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+
+        /* Controls */
+        .input-area { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; background: #222; border: 1px solid #444; color: white; padding: 12px; border-radius: 5px; }
+        button { background: var(--red); color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+
+        /* GM Panel */
+        .gm-panel { background: rgba(211, 47, 47, 0.1); border: 1px dashed var(--red); padding: 20px; border-radius: 10px; display: none; }
+        .gm-title { color: var(--red); font-weight: bold; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+        .gm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .btn-gm { background: #333; border: 1px solid var(--red); font-size: 0.8rem; }
+        .btn-gm:hover { background: var(--red); }
+    </style>
+</head>
+<body>
+
+    <div class="world-status">
+        <div style="display: flex; justify-content: space-between;">
+            <span>🌍 สถานะโลกบำเพ็ญ</span>
+            <span id="playerCount">ผู้บำเพ็ญ: 0 คน</span>
+        </div>
+        <div class="chaos-bar"><div id="chaosFill"></div></div>
+        <div style="font-size: 0.7rem; margin-top: 5px; color: #aaa;">Chaos Level: <span id="chaosVal">0</span>%</div>
+    </div>
+
+    <div id="logWindow">
+        <div class="msg system">ยินดีต้อนรับจอมยุทธ... พิมพ์ 'help' เพื่อดูคำสั่ง</div>
+    </div>
+
+    <div class="input-area">
+        <input type="text" id="cmdInput" placeholder="พิมพ์คำสั่งหรือข้อความแชท...">
+        <button onclick="sendCmd()">ส่ง</button>
+    </div>
+
+    <div id="gmLogin">
+        <input type="password" id="gmCode" placeholder="ใส่รหัสลับ GM..." style="max-width: 150px;">
+        <button onclick="loginGM()" style="background: #444;">Login GM</button>
+    </div>
+
+    <div id="gmSection" class="gm-panel">
+        <div class="gm-title">👑 แผงควบคุมเทพเจ้า (GM Menu)</div>
+        <div class="gm-grid">
+            <button class="btn-gm" onclick="gmAction('spawn_boss')">👺 เสกบอสใหญ่</button>
+            <button class="btn-gm" onclick="gmAction('add_chaos')">🔥 เพิ่มความวุ่นวาย</button>
+            <button class="btn-gm" onclick="gmAction('clear_logs')">🧹 ล้างบันทึกโลก</button>
+            <button class="btn-gm" onclick="gmAction('world_reset')">🔄 รีเซ็ตโลก</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let isGM = false;
+
+        // รับข้อมูลจาก Server
+        socket.on('world_update', (data) => {
+            document.getElementById('chaosFill').style.width = data.chaos + '%';
+            document.getElementById('chaosVal').innerText = data.chaos;
+            document.getElementById('playerCount').innerText = `ผู้บำเพ็ญ: ${Object.keys(data.players).length} คน`;
+        });
+
+        socket.on('system_msg', (msg) => {
+            addLog(msg, 'system');
+        });
+
+        socket.on('boss_event', (msg) => {
+            addLog("🚨 บอสบุก: " + msg, 'boss');
+        });
+
+        function addLog(text, type = '') {
+            const log = document.getElementById('logWindow');
+            const div = document.createElement('div');
+            div.className = `msg ${type}`;
+            div.innerText = text;
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function sendCmd() {
+            const input = document.getElementById('cmdInput');
+            if(!input.value) return;
+            
+            // ส่งเข้าแชทหรือคำสั่ง
+            socket.emit('player_chat', input.value);
+            input.value = '';
+        }
+
+        function loginGM() {
+            const code = document.getElementById('gmCode').value;
+            if(code === '1234GMSECRET') { // รหัสตรงกับใน server.js
+                isGM = true;
+                document.getElementById('gmSection').style.display = 'block';
+                document.getElementById('gmLogin').style.display = 'none';
+                addLog("คุณเข้าสู่โหมด GM แล้ว", "system");
+            } else {
+                alert("รหัสไม่ถูกต้อง!");
+            }
+        }
+
+        function gmAction(type) {
+            if(!isGM) return;
+            socket.emit('gm_command', { type: type });
+        }
+    </script>
+</body>
+</html>
